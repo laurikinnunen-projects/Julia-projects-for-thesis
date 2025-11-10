@@ -172,4 +172,5 @@ p2_lin = plot(t_vals_lin, vx_vals_lin, label="vx", xlabel="Time (s)", ylabel="Ve
 plot!(p2_lin, t_vals_lin, vy_vals_lin, label="vy")
 plot!(p2_lin, t_vals_lin, vz_vals_lin, label="vz")
 
+
 plot(p1_lin, p2_lin, layout=(2,1))
