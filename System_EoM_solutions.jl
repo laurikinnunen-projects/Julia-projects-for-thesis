@@ -20,10 +20,10 @@ params = (
     P2 = 150e-3,                       # (Low) Optical power in the negative arm                        
     w01 = 350e-6,                      # Beam waist [m] in the positive direction
     w02 = 300e-6,                      # Beam waist [m] in the negative direction 
-    a_p = 1.0e-28,                     # Particle polarizability SI units
+    a_p = -0.3e-25,                     # Particle polarizability SI units
     λ = 1064e-9,                       # Laser wavelength [m]
-    σv = 1.3e-2,                       # Noise amplitude
-    Γ = 1e-5,                          # Damping coefficient (Millen: for room temperature)
+    σv = 1.3e-20,                      # Noise amplitude
+    Γ = 1e-20,                         # Damping coefficient (Millen: for room temperature)
     n = 1.45,                          # Refractive index of a silica Particle
     c = 3e8,                           # Speed of ligth                     
     e0 = 9e-12,                        # Vacuum permittivity
@@ -37,7 +37,7 @@ u_init = vcat(v0, u0)
 
 
 # Time span, adjustbale with the time step
-tspan = (0.0, 2e-2)                   
+tspan = (0.0, 5e-2)                   
 
 # Rayleigh range for Gaussian beam
 function w_of_z1(x, w01, λ, n)
@@ -62,6 +62,10 @@ function Eopt_total_sqrd(pos::AbstractVector, p)
     wz1 = w_of_z1(x, w01, λ, n)
     wz2 = w_of_z2(x, w02, λ, n)
 
+    # Inverse of the invariant part of Rayleigh range for gradients
+    inv_zR1 = λ / (π * w01^2 * n)
+    inv_zR2 = λ / (π * w02^2 * n)
+
     # Rayleigh range
     zR1 = π * w01^2 * n / λ
     zR2 = π * w02^2 * n / λ
@@ -81,7 +85,7 @@ function Eopt_total_sqrd(pos::AbstractVector, p)
     k = 2 * π * n / λ
 
     # Radius of curvature with condition for the case x=0
-    Rz1 = abs(x) < ϵ ? x * (1 + (zR1 / (x + ϵ)^2)) : x * (1 + (zR1 / x^2))
+    Rz1 = abs(x) < ϵ ? x * (1 + (zR1 / (x + ϵ))^2) : x * (1 + (zR1 / x)^2)
     Rz2 = abs(x) < ϵ ? -x * (1 + (zR2 / (-x + ϵ))^2) : -x * (1 + (zR2 / -x)^2)
 
     # Ocsillation frequency
@@ -92,19 +96,28 @@ function Eopt_total_sqrd(pos::AbstractVector, p)
     φ2 = -k*x + k*r_sq/(2*Rz2) - atan(-x/zR2) #+ freq_o*t
 
     # The total field without time avergaing, just for reminder
-    # E_opt = (E01 * w01/wz1)*exp1*cos(φ1) - (E02 * w02/wz2)*exp2*cos(φ2)
+    # E_opt = ((E01 * w01/wz1)*exp1*cos(φ1) - (E02 * w02/wz2)*exp2*cos(φ2))^2
 
     # The parts of the field thats are left after squaring and will be taken gradient over
     E2_opt = ((E01 * w01/wz1)*exp1)^2 + ((E02 * w02/wz2)* exp2)^2
-    return E2_opt
-end
 
-# gradient function for the laser field
-function E_sqr_grad(r, p)
-    grad = ForwardDiff.gradient(r_ -> Eopt_total_sqrd(r_, p), r)
-    E2_grad_avg = 0.5 .* grad  # Time averaging <cos^2> = 1/2
-    return E2_grad_avg
-end 
+    # dE^2_opt / dx calculated analytically
+    dE1_2_x = E01^2 * (((w01/wz1)^2) * (4 * r_sq * x * inv_zR1^2) / (w01^2 * (1 + (inv_zR1 * x)^2)^2) * exp1^2 - exp1^2 *((2 * inv_zR1^2 * x) / (1 + (inv_zR1 * x)^2)^2))
+    dE2_2_x = E02^2 * (((w02/wz2)^2) * (4 * r_sq * x * inv_zR2^2) / (w02^2 * (1 + (-inv_zR2 * x)^2)^2) * exp2^2 - exp2^2 *((2 * inv_zR2^2 * x) / (1 + (-inv_zR2 * x)^2)^2))
+    dE2_x = dE1_2_x + dE2_2_x
+    
+    # dE^2_opt / dy calculated analytically
+    dE1_2_y = E01^2 * (w01/wz1)^2 * (- 4 * y / w01^2 * (1 + (inv_zR1 * x)^2)) * exp1^2
+    dE2_2_y = E02^2 * (w02/wz2)^2 * (- 4 * y / w02^2 * (1 + (-inv_zR2 * x)^2)) * exp2^2
+    dE2_y = dE1_2_y + dE2_2_y
+
+    # dE^2_opt / dz calculated analytically
+    dE1_2_z = E01^2 * (w01/wz1)^2 * (- 4 * z / w01^2 * (1 + (inv_zR1 * x)^2)) * exp1^2
+    dE2_2_z = E02^2 * (w02/wz2)^2 * (- 4 * z / w02^2 * (1 + (-inv_zR2 * x)^2)) * exp2^2
+    dE2_z = dE1_2_z + dE2_2_z
+
+    return SVector(dE2_x, dE2_y, dE2_z)
+end
 
 
 # Equations of motion
@@ -126,25 +139,24 @@ function h!(du, u, p, t)
     Fy_rf = - m * w_rf^2 / 4 * (a - 2q * cos(w_rf * t)) * y
     Fz_rf = - m * w_rf^2 / 4 * (a - 0 * cos(w_rf * t)) * z 
 
-    # Optical forces as vector (from gradient of potential)
-    pos = @SVector [x, y, z]
-    gradV = E_sqr_grad(pos, p)   # ∇⟨E^2⟩
-
-    Fopt = 0.5 * a_p .* gradV 
-    Fx_opt, Fy_opt, Fz_opt = Fopt  # Force = 1/2 α ∇⟨E^2⟩ 
-
-    # The scattering froce for the dipole approimation still needed here from the Poyinting vector
+    # Force = 1/2 α ∇⟨E^2⟩, stores the svector array values to the variable as ∇E2 = dE2_x, dE2_y, dE2_z
+    ∇E2 = Eopt_total_sqrd(@SVector[x, y, z], p)
     
-    # Accelerations and the damping
-    du[1] = (Fx_rf + Fx_opt) / m - Γ * vx
-    du[2] = (Fy_rf + Fy_opt) / m - Γ * vy
-    du[3] = (Fz_rf + Fz_opt) / m - Γ * vz
+    # Assign to each force component the corresponding gradient component from the statevector and multiply by 1/2*a_p
+    Fx_opt, Fy_opt, Fz_opt = 0.5 * a_p .* ∇E2 
+
+    # The scattering force for the dipole approimation still needed here from the Poyinting vector
+    
+    # Accelerations and the damping # RF field commented out
+    du[1] = (#=Fx_rf + =#Fx_opt) / m - Γ * vx
+    du[2] = (#=Fy_rf + =#Fy_opt) / m - Γ * vy
+    du[3] = (#=Fz_rf + =#Fz_opt) / m - Γ * vz
 end
 
 # Diffusion term g(u,p,t) = Wiener process
 function g!(du, u, p, t)
     (; σv) = p
-    du .= 0.0
+    fill!(du, 0.0)
     du[1] = σv
     du[2] = σv
     du[3] = σv
@@ -172,33 +184,8 @@ p2_lin = plot(t_vals_lin, vx_vals_lin, label="vx", xlabel="Time (s)", ylabel="Ve
 plot!(p2_lin, t_vals_lin, vy_vals_lin, label="vy")
 plot!(p2_lin, t_vals_lin, vz_vals_lin, label="vz")
 
-
 plot(p1_lin, p2_lin, layout=(2,1))
 
 
-
-
-
-
-
-# Testikoodi tavallisen differentiaaliyhtälön ratkaisemiseksi, jolla testasin, että voimat toimivat kuten pitää
-
-#prob_opt = ODEProblem(h!, u_init, tspan, params)
-
-#sol_opt = solve(prob_opt, Rodas5P(), reltol=1e-10, abstol=1e-12, dt=1e-11)
-
-#=vx_vals_opt = sol_opt[1,:]; vy_vals_opt = sol_opt[2,:]; vz_vals_opt = sol_opt[3,:]
-x_vals_opt  = sol_opt[4,:]; y_vals_opt  = sol_opt[5,:]; z_vals_opt  = sol_opt[6,:]
-t_vals_opt  = sol_opt.t
-
-# Plot q(t) for x/y/z linear system with scaling to avoid loss of precision
-p1_opt = plot(t_vals_opt, x_vals_opt, label="x", xlabel="Time (s)", ylabel="Position (m)")
-plot!(p1_opt, t_vals_opt, y_vals_opt, label="y")
-plot!(p1_opt, t_vals_opt, z_vals_opt, label="z")
-
-# Plot v(t) for x/y/z linear system with scaling to avoid loss of precision
-p2_opt = plot(t_vals_opt, vx_vals_opt, label="vx", xlabel="Time (s)", ylabel="Velocity (m/s)")
-plot!(p2_opt, t_vals_opt, vy_vals_opt, label="vy")
-plot!(p2_opt, t_vals_opt, vz_vals_opt, label="vz")
-
-plot(p1_opt, p2_opt, layout=(2,1))=#
+#savefig(p1_lin, "Linear_trap_q(t)_Opt.png")  
+#savefig(p2_lin, "Linear_trap_v(t)_Opt.png") 
