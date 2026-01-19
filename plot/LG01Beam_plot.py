@@ -2,7 +2,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Simplified dual beam setup for LG10 beams
+# Simplified dual beam setup for LG01 beams
 
 # range
 y = np.linspace(-3, 3, 400)
