@@ -48,7 +48,6 @@ sol = solve(prob, EM(), adaptive = false, dt = dt)  # Euler-Maruyama method
 
 # Wiener increments
 dw = sol.W.dW
-W = sol.W
 
 # Analytical noisy damped harmonic oscillator solution, deterministic part
 function q_deterministic(u_init, t, p)
